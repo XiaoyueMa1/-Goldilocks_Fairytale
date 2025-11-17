@@ -1,0 +1,268 @@
+
+#include <HX711.h>
+
+// Pin setup
+const byte LOADCELL_DOUT_PIN = 3;   // HX711 DOUT
+const byte LOADCELL_SCK_PIN  = 2;   // HX711 SCK
+const byte BUZZER_PIN        = 8;
+const byte LED_GREEN_PIN     = 9;
+const byte LED_RED_PIN       = 10;
+const byte BUTTON_PIN        = 7;   // pull to GND when pressed (use INPUT_PULLUP)
+
+// Target settings (in grams). Tune these to taste.
+float TARGET_MIN_G = 25.0;   // lower bound of "just right"
+float TARGET_MAX_G = 35.0;   // upper bound of "just right"
+
+// Stability and detection settings
+const unsigned long DWELL_MS            = 400;   // how long the measured drop must stay in range
+const float STABILITY_DELTA_G           = 1.0;   // max change during dwell to count as stable
+const float EVENT_MIN_DROP_G            = 5.0;   // ignore tiny fluctuations
+const float REARM_NEAR_BASE_THRESH_G    = 3.0;   // return near baseline to rearm
+
+// Smoothing
+const float EMA_ALPHA = 0.20f;  // exponential moving average weight smoothing
+
+// HX711 and calibration
+HX711 scale;
+// Start with a rough factor, then tune using a known weight.
+// Positive factor for your wiring orientation. Invert sign if readings go the wrong way.
+float CALIBRATION_FACTOR = -420.0f;
+
+// State machine
+enum State { ARMING, MEASURING, SUCCESS, COOL_DOWN };
+State state = ARMING;
+
+// Baseline tracking
+float emaWeightG = 0.0f;         // smoothed current bowl weight in grams
+float baselineG  = 0.0f;         // learned resting weight of bowl + contents
+unsigned long inRangeSince = 0;  // dwell timer
+bool buttonPrev = true;
+
+// Timing
+unsigned long lastBeep = 0;
+const unsigned long SUCCESS_TONE_MS = 200;
+
+// Utility: simple tone helper
+void beep(unsigned int freq, unsigned long ms) {
+  tone(BUZZER_PIN, freq);
+  delay(ms);
+  noTone(BUZZER_PIN);
+}
+
+// Read a single smoothed weight sample
+float readWeightGrams() {
+  // raw units to grams
+  float raw = scale.get_units(1); // library internally averages if set_scale used
+  // get_units uses the scale factor set by set_scale; it already returns "weight units"
+  // To keep control clear, we will use read_average and convert manually instead.
+  // But to avoid confusion, we handle conversion explicitly below by using read_average.
+  return raw;
+}
+
+// More explicit conversion path to avoid ambiguity
+float readWeightGramsExplicit() {
+  long raw = scale.read_average(5);  // average a few samples
+  // Convert raw to grams: grams = (raw - offset) / calibration_factor
+  // The HX711 lib manages offset with tare(), and set_scale() sets factor,
+  // but we keep the formula clear by relying on the library methods as intended.
+  // We will keep using the library interface below to avoid double applying factors.
+  return scale.get_units(5); // uses internal offset and scale
+}
+
+// LED helpers
+void setLEDs(bool greenOn, bool redOn) {
+  digitalWrite(LED_GREEN_PIN, greenOn ? HIGH : LOW);
+  digitalWrite(LED_RED_PIN,   redOn   ? HIGH : LOW);
+}
+
+void quickSuccessSignal() {
+  setLEDs(true, false);
+  beep(1200, 120);
+  delay(80);
+  beep(1500, 140);
+}
+
+void failureBlink() {
+  for (int i = 0; i < 2; i++) {
+    setLEDs(false, true);
+    beep(300, 60);
+    delay(80);
+    setLEDs(false, false);
+    noTone(BUZZER_PIN);
+    delay(80);
+  }
+}
+
+// Manual tare
+void tareNow() {
+  setLEDs(false, true);
+  scale.tare(20);  // average 20 reads
+  // After tare, both ema and baseline should reset
+  float w = scale.get_units(10);
+  emaWeightG = w;
+  baselineG  = w;
+  setLEDs(false, false);
+}
+
+// Simple button read with INPUT_PULLUP
+bool buttonPressed() {
+  bool b = digitalRead(BUTTON_PIN) == LOW;
+  return b;
+}
+
+void setup() {
+  pinMode(BUZZER_PIN, OUTPUT);
+  pinMode(LED_GREEN_PIN, OUTPUT);
+  pinMode(LED_RED_PIN, OUTPUT);
+  pinMode(BUTTON_PIN, INPUT_PULLUP);
+
+  Serial.begin(115200);
+  delay(300);
+
+  scale.begin(LOADCELL_DOUT_PIN, LOADCELL_SCK_PIN);
+  // Set calibration factor. Positive or negative depends on wiring.
+  scale.set_scale(CALIBRATION_FACTOR);
+  scale.tare(30);  // zero out with empty bowl or with desired starting content as your baseline
+
+  // Initialize filters
+  emaWeightG = scale.get_units(15);
+  baselineG  = emaWeightG;
+
+  setLEDs(false, false);
+  beep(800, 80);
+  delay(60);
+  beep(1000, 80);
+
+  Serial.println("Goldilocks Just Right detector ready.");
+  Serial.println("Use the button to tare. Adjust TARGET_MIN_G and TARGET_MAX_G as needed.");
+  Serial.print("Calibration factor: "); Serial.println(CALIBRATION_FACTOR);
+}
+
+void loop() {
+  // Manual tare on button press
+  bool bNow = buttonPressed();
+  if (bNow && !buttonPrev) {
+    Serial.println("Manual tare requested.");
+    tareNow();
+    state = ARMING;
+  }
+  buttonPrev = bNow;
+
+  // Read and smooth current weight
+  float w = scale.get_units(5); // grams after calibration
+  emaWeightG = EMA_ALPHA * w + (1.0f - EMA_ALPHA) * emaWeightG;
+
+  // Update moving baseline when system looks idle
+  // If the bowl is at rest (near recent baseline), slowly track baseline
+  float deviation = fabsf(emaWeightG - baselineG);
+  if (deviation < 2.0f) {
+    // slow creep toward current value
+    baselineG = 0.99f * baselineG + 0.01f * emaWeightG;
+  }
+
+  // Compute drop amount (how much lighter than baseline)
+  float dropG = baselineG - emaWeightG;
+
+  // Print telemetry for tuning
+  static unsigned long lastPrint = 0;
+  if (millis() - lastPrint > 250) {
+    lastPrint = millis();
+    Serial.print("Weight(g): ");
+    Serial.print(emaWeightG, 1);
+    Serial.print("  Baseline(g): ");
+    Serial.print(baselineG, 1);
+    Serial.print("  Drop(g): ");
+    Serial.print(dropG, 1);
+    Serial.print("  State: ");
+    Serial.println(state);
+  }
+
+  switch (state) {
+    case ARMING: {
+      setLEDs(false, false);
+      inRangeSince = 0;
+
+      // Wait for a meaningful drop that could be a spoon lift
+      if (dropG > EVENT_MIN_DROP_G) {
+        state = MEASURING;
+        Serial.println("Event detected. Measuring...");
+      }
+      break;
+    }
+
+    case MEASURING: {
+      // Check if drop sits in the target window
+      bool inWindow = (dropG >= TARGET_MIN_G && dropG <= TARGET_MAX_G);
+
+      // Basic stability check across dwell window
+      static float lastDrop = 0.0f;
+      static unsigned long lastChange = 0;
+
+      float change = fabsf(dropG - lastDrop);
+      if (change > STABILITY_DELTA_G) {
+        lastChange = millis();
+      }
+      lastDrop = dropG;
+
+      if (inWindow) {
+        if (inRangeSince == 0) {
+          inRangeSince = millis();
+        }
+        // make sure it stayed calm during dwell
+        bool stable = (millis() - lastChange) >= DWELL_MS;
+        bool longEnough = (millis() - inRangeSince) >= DWELL_MS;
+
+        // Indicate proximity with green LED while measuring
+        setLEDs(true, false);
+
+        if (stable && longEnough) {
+          Serial.println("Just right. Success.");
+          quickSuccessSignal();
+          state = SUCCESS;
+        }
+      } else {
+        // If we left the window, reset dwell timer
+        inRangeSince = 0;
+
+        // If the drop is far too big or too small, show red briefly
+        if (dropG > TARGET_MAX_G + 2.0f || (dropG > EVENT_MIN_DROP_G && dropG < TARGET_MIN_G - 2.0f)) {
+          setLEDs(false, true);
+        } else {
+          setLEDs(false, false);
+        }
+
+        // If the event ended, rearm
+        if (dropG < EVENT_MIN_DROP_G * 0.5f) {
+          state = ARMING;
+          setLEDs(false, false);
+        }
+      }
+      break;
+    }
+
+    case SUCCESS: {
+      // Stay in success until the bowl returns near baseline, then enter cool down
+      setLEDs(true, false);
+      if (dropG < REARM_NEAR_BASE_THRESH_G) {
+        state = COOL_DOWN;
+        setLEDs(false, false);
+        Serial.println("Returned near baseline. Cool down.");
+      }
+      break;
+    }
+
+    case COOL_DOWN: {
+      // Small delay to avoid double triggering while the spoon is put back
+      static unsigned long enteredAt = 0;
+      if (enteredAt == 0) enteredAt = millis();
+
+      if (millis() - enteredAt > 400) {
+        enteredAt = 0;
+        state = ARMING;
+        setLEDs(false, false);
+        Serial.println("Armed.");
+      }
+      break;
+    }
+  }
+}
