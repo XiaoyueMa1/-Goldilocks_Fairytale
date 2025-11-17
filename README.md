@@ -1,0 +1,1 @@
+Sanya Reddy & Xiaoyue Ma --- Our project is about goldilocks traveling through her journey and trying different things to find out which one is the best, which we will showcase through cardboard and our Arduino
