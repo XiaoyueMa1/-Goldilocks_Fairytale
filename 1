@@ -1,0 +1,110 @@
+# Mechanisms & Affordances  
+### Sanya Reddy & Xiaoyue Ma  
+### Goldilocks Fairytale Interactive Project  
+
+Our project is about Goldilocks traveling through her journey and trying different things to find out which one is the best.  
+We are showcasing these experiences through **cardboard-built interactions** combined with **Arduino-based mechanisms**.
+
+This branch documents the **mechanisms** and **affordances** for the 9-2 lecture topic.
+
+---
+
+## 1. Overview of Our Interactive System
+
+Goldilocks travels through three different cardboard “stations,” each representing a choice she must test on her journey (e.g., doors, bowls, beds, or items she compares).  
+At each station, the user interacts with a **physical mechanism** (button / switch / sensor / servo movement), and receives **feedback** (LEDs, movement, sound) that communicates which option is “too much,” “too little,” or “just right.”
+
+The system uses simple electronics (Arduino, LEDs, sensors, cardboard switches, and servos) to illustrate each part of her journey.
+
+---
+
+## 2. Mechanisms (Physical + Electronic)
+
+### **2.1 Cardboard Interaction Mechanisms**
+Each station is built from cardboard and includes:
+- **Custom cardboard switches** made using foil or copper tape  
+  → users activate a choice by pressing/touching the element  
+- **Hinges or moving parts** that allow Goldilocks’ items to open, flip, lift, etc.
+
+These are inspired directly by slide examples of making custom switches.
+
+### **2.2 Buttons & Copper-Tape Switches**
+- Users select an item Goldilocks tests (e.g., three options).
+- Each option is connected to Arduino through:
+  - foil/copper tape switch  
+  - or a pushbutton  
+
+### **2.3 LED Feedback Mechanism**
+We use LEDs to visually reflect Goldilocks’ discovery:
+- **Green LED:** “Just right”
+- **Red LED:** “Too little / too much”
+- **Yellow LED:** “Maybe / neutral / still trying”
+
+### **2.4 Servo Motor Mechanism**
+Some stations include servo-based motion:
+- Doors that open when Goldilocks chooses correctly  
+- A pointer/indicator that rotates to signal “best choice”  
+- A cardboard element that moves to show approval/rejection  
+
+Mechanically, the servo is mounted behind cardboard, with the horn connected to a flap or sign.
+
+### **2.5 Audio Feedback (Optional Buzzer)**
+A buzzer gives:
+- Success tone (rising notes)
+- Failure tone (short low beep)
+- Neutral tone for exploration  
+
+---
+
+## 3. Affordances (How users know what to do)
+
+### **3.1 Perceived Affordances**
+- Cardboard buttons visually look pressable.  
+- Cut-out shapes “invite” touching/lifting.  
+- Goldilocks icons or illustrations indicate that each station is part of her journey.
+
+### **3.2 Signifiers (Clear Indicators)**
+From the 9-2 slides:
+- **Arrows** printed on cardboard show where to press.
+- **Colors** (green, red, yellow) signal results.
+- **Labels** such as “Try me,” “Option 1,” “Best pick,” make actions obvious.
+
+### **3.3 Mapping**
+Each user action maps to a clear output:
+- **Press switch → LED lights up**  
+- **Choose correct option → servo moves Goldilocks forward**  
+- **Choose wrong option → failure tone + red LED**  
+
+The mapping is intentionally simple so the user understands the cause-and-effect immediately.
+
+### **3.4 Feedback**
+The project gives immediate sensory feedback:
+- **Visual:** LEDs respond instantly  
+- **Movement:** servo opens/closes a cardboard door  
+- **Audio:** success/failure tones  
+- **Narrative feedback:** Goldilocks “advances” to next station  
+
+### **3.5 Constraints**
+- Only one option triggers the correct outcome.  
+- Servo movement is limited by the cardboard linkage.  
+- Switch layout prevents users from pressing multiple options at once.  
+
+This ensures the experience is clean and prevents accidental inputs.
+
+---
+
+## 4. User Flow (Goldilocks’ Journey)
+
+### **Step-by-Step Flow**
+
+1. **User sees three cardboard choices** at a station.  
+2. Each choice has a signifier (arrow/word/icon).  
+3. User presses or touches the cardboard switch.  
+4. Arduino reads the input and determines:
+   - Wrong option → red LED + low tone  
+   - “Just right” → green LED + success tone  
+5. On success, a **servo reveals the next part** of Goldilocks' journey.  
+6. User continues to the next cardboard station.
+
+### **Simple Flow Diagram**
+
